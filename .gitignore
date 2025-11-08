@@ -1,0 +1,25 @@
+# 忽略图片文件
+plot/
+*.png
+*.jpg
+*.jpeg
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# 数据文件（可选，根据需要）
+# data/
+
+# IDE
+.vscode/
+.idea/
+
+# 日志文件
+*.log

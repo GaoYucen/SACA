@@ -11,8 +11,8 @@ from collections import deque
 import matplotlib.pyplot as plt
 
 # 设备配置，使用mps
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Config:
     def __init__(self):
