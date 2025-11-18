@@ -4,6 +4,16 @@ plot/
 *.jpg
 *.jpeg
 
+# 忽略数据集
+dataset/
+
+# 忽略日志
+wandb/
+
+# 忽略模型检查点
+*.pth
+*.pt
+
 # Python 缓存
 __pycache__/
 *.pyc
@@ -13,6 +23,7 @@ __pycache__/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
+*.ipynb
 
 # 数据文件（可选，根据需要）
 # data/
