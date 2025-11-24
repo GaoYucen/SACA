@@ -5,7 +5,7 @@ BASE = pathlib.Path(__file__).resolve().parent
 
 class config:
     BUS_SIZE = 50 # Bus的容量
-    FILE_PATH = BASE.parent.parent / "data" / "pam_res" / "bus_stations.txt" # 公交站点文件路径
+    FILE_PATH = BASE.parent / "find_station" / "stations_30" / "bus_stations.txt" # 公交站点文件路径
     STATIONNUM = [16, 17] # 一次发车，经停站点数量范围
     TIANFUPOS = [104.444731, 30.323036] # 天府机场经纬度
     DATANUM = 1024 # 数据集大小
