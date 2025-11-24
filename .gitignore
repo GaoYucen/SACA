@@ -6,6 +6,7 @@ plot/
 
 # 忽略数据集
 dataset/
+dataset_traincenter/
 
 # 忽略日志
 wandb/
@@ -13,6 +14,11 @@ wandb/
 # 忽略模型检查点
 *.pth
 *.pt
+# 但不忽略 model 目录下的
+!routing_model/model/*.pth
+!routing_model/model/**/*.pt
+
+
 
 # Python 缓存
 __pycache__/

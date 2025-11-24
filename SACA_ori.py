@@ -9,6 +9,10 @@ from scipy.spatial import distance_matrix
 import random
 from collections import deque
 import matplotlib.pyplot as plt
+import routing_model.AM as am
+import routing_model.gener_data as gd
+import pathlib
+BASEFILE = pathlib.Path(__file__).parent.resolve()
 
 # 设备配置，使用mps
 # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -17,7 +21,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Config:
     def __init__(self):
         # 业务场景参数（论文Section V）
-        self.departure_station = np.array([104.06, 30.67])  # 成都火车站经纬度（模拟）
+        # self.departure_station = np.array([104.444731, 30.323036])  # 成都天府国际机场经纬度
+        self.departure_station = np.array([104.06, 30.67])  # 成都火车东站经纬度
         self.num_destinations = 30  # 论文中聚类得到的30个目的地
         self.bus_capacity = 30  # 公交容量（论文Section V.B）
         self.bus_speed = 30  # 公交速度（km/h）
@@ -67,9 +72,19 @@ class BusBookingEnv:
     def init_destinations(self):
         """生成30个目的地的经纬度（模拟DBSCAN-PAM聚类结果）"""
         np.random.seed(42)
-        self.dest_coords = self.config.departure_station + np.random.normal(0, 5, (self.config.num_destinations, 2))
+        # self.dest_coords = self.config.departure_station + np.random.normal(0, 5, (self.config.num_destinations, 2))
+
+        # 读取预生成的目的地坐标
+        self.dest_coords = np.array(gd.readbusstations(gd.config.FILE_PATH))
+
         # 计算每个目的地到出发站的距离（km，基于经纬度粗略转换）
-        self.dist_k = distance_matrix([self.config.departure_station], self.dest_coords)[0] * 111  # 1度≈111km
+        # self.dist_k = distance_matrix([self.config.departure_station], self.dest_coords)[0] * 111  # 1度≈111km
+        dep_lon = torch.full((self.config.num_destinations,), float(self.config.departure_station[0]), device=device)
+        dep_lat = torch.full((self.config.num_destinations,), float(self.config.departure_station[1]), device=device)
+        dest_lons = torch.tensor(self.dest_coords[:, 0], device=device, dtype=torch.float32)
+        dest_lats = torch.tensor(self.dest_coords[:, 1], device=device, dtype=torch.float32)
+        self.dist_k = am.haversine_torch(dep_lon, dep_lat, dest_lons, dest_lats, device).detach().cpu().numpy()
+
         self.dist_max = np.max(self.dist_k)
         self.dist_min = np.min(self.dist_k)
 
@@ -179,12 +194,44 @@ class BusBookingEnv:
         return next_state, reward, done, info
 
     def calculate_route_distance(self, route):
-        """计算路径总距离（出发站→所有目的地→出发站）"""
+        """
+        计算路径总距离（出发站→所有目的地→出发站）
+        [已修改] 使用 Haversine 公式计算球面距离 (km)
+        """
         if len(route) == 0:
             return 0.0
-        # 路径坐标序列：出发站 → 目的地1 → 目的地2 → ... → 出发站
-        coords = [self.config.departure_station] + [self.dest_coords[k] for k in route] + [self.config.departure_station]
-        return np.sum(distance_matrix(coords, coords)[np.arange(len(coords)-1), np.arange(1, len(coords))]) * 111
+            
+        # 1. 构建完整的路径坐标序列：出发站 → 目的地1...N → 出发站
+        # self.config.departure_station shape: (2,)
+        # self.dest_coords[k] shape: (2,)
+        path_coords = np.array(
+            [self.config.departure_station] + 
+            [self.dest_coords[k] for k in route] + 
+            [self.config.departure_station]
+        )
+        
+        # 2. 提取相邻的点对
+        # p1: 0 到 N-1
+        # p2: 1 到 N
+        lon1, lat1 = path_coords[:-1, 0], path_coords[:-1, 1]
+        lon2, lat2 = path_coords[1:, 0], path_coords[1:, 1]
+        
+        # 3. Haversine 公式计算 (NumPy 矢量化)
+        R = 6371.0  # 地球平均半径 (km)
+        
+        # 将角度转换为弧度
+        lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+        
+        dlon = lon2 - lon1
+        dlat = lat2 - lat1
+        
+        a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+        c = 2 * np.arcsin(np.sqrt(a)) # 或 use np.arctan2(np.sqrt(a), np.sqrt(1-a))
+        
+        distances = R * c
+        
+        # 4. 返回总距离
+        return np.sum(distances)
 
     def update_bus_state(self, bus_routes):
         """更新公交剩余返回时间（基于路径长度与速度）"""
@@ -500,6 +547,23 @@ class AttentionDispatcherRouter(nn.Module):
         # Decoder：路径生成（基于注意力权重）
         self.decoder_proj = nn.Linear(config.embedding_dim * 2, 1)  # 输入：目的地嵌入+公交状态嵌入
 
+        # ... 其他初始化 ...
+        
+        # 1. 加载模型
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # 确保超参数与训练时一致
+        EMBEDDING_DIM=64
+        N_HEADS=8
+        N_LAYERS=3
+        self.route_model = am.AttentionRouteModel(EMBEDDING_DIM, N_HEADS, N_LAYERS).to(self.device)
+        model_path = BASEFILE / "routing_model" / "model" / "best_model.pth"
+        self.route_model.load_state_dict(torch.load(str(model_path), map_location=self.device))
+        self.route_model.eval() # 设为评估模式
+        
+        # 2. 加载归一化统计量
+        stats_path = BASEFILE / "routing_model" / "model" / "normalization_stats.pt"
+        self.stats = torch.load(str(stats_path), map_location=self.device)
+
     def embed_destinations(self, dest_ids):
         """嵌入目的地（输入：目的地ID列表，输出：(1, seq_len, embed_dim)）"""
         if len(dest_ids) == 0:
@@ -509,60 +573,84 @@ class AttentionDispatcherRouter(nn.Module):
         return self.encoder(embed)
 
     def dispatch(self, orders, buses):
-        """派单与路径规划
+        """
+        派单与路径规划（集成训练好的 AttentionRouteModel）
         输入：orders-订单列表（每个元素是目的地ID），buses-公交状态字典
         输出：bus_routes-公交路径字典{bus_id: [dest_id1, dest_id2, ...]}
         """
         if len(orders) == 0 or len(buses) == 0:
             return {}, {}
 
-        # 1. 嵌入所有订单对应的目的地
-        unique_dests = list(set(orders))
-        dest_embeds = self.embed_destinations(unique_dests)  # (1, num_unique_dest, embed_dim)
-        dest_to_idx = {d: i for i, d in enumerate(unique_dests)}
-
-        # 2. 为每个公交分配订单并规划路径
         bus_routes = {}
         bus_orders = {}
         remaining_orders = orders.copy()
         available_buses = [bid for bid in buses if buses[bid][0] == 0.0]  # 可用公交
 
+        # --- 准备归一化参数 (移动到 device) ---
+        mean = self.stats['mean'].to(self.device)
+        std = self.stats['std'].to(self.device)
+        
+        # 准备出发站数据 (1, 2)
+        start_node = torch.tensor(self.config.departure_station, device=self.device, dtype=torch.float32).unsqueeze(0)
+        # 归一化出发站: (start - mean_loc) / std_loc
+        start_norm = (start_node - mean[None, :2]) / std[None, :2]
+
         for bus_id in available_buses:
             if len(remaining_orders) == 0:
                 break
-            bus_capacity = buses[bus_id][1]
+            bus_capacity = int(buses[bus_id][1])
 
-            # 3. 选择不超过容量的订单（基于距离优先级：优先近距订单减少绕路）
+            # 3. 选择不超过容量的订单
+            # self.dist_k 是 numpy 数组，直接索引
             order_dists = [self.dist_k[d] for d in remaining_orders]
             sorted_indices = np.argsort(order_dists)[:bus_capacity]
+            
             assigned_orders = [remaining_orders[i] for i in sorted_indices]
-            # 从剩余订单中移除已分配订单
-            remaining_orders = [remaining_orders[i] for i in range(len(remaining_orders)) if i not in sorted_indices]
+            
+            # 从剩余订单中移除已分配订单 (重构列表以避免索引错误)
+            # 使用 mask 标记要保留的订单
+            keep_mask = np.ones(len(remaining_orders), dtype=bool)
+            keep_mask[sorted_indices] = False
+            remaining_orders = [remaining_orders[i] for i in range(len(remaining_orders)) if keep_mask[i]]
 
-            # 4. 为已分配订单规划路径（基于注意力权重排序）
             if len(assigned_orders) == 0:
                 continue
-            # 嵌入已分配订单的目的地
-            assigned_dests = list(set(assigned_orders))
-            assigned_embeds = self.embed_destinations(assigned_dests)  # (1, num_dest, embed_dim)
-            # 计算注意力权重（目的地嵌入之间的相关性）
-            attn_weights = torch.matmul(assigned_embeds, assigned_embeds.transpose(1, 2))  # (1, num_dest, num_dest)
-            attn_weights = attn_weights.mean(dim=0).detach().cpu().numpy()  # (num_dest, num_dest)
 
-            # 5. 贪心路径规划（从出发站最近的目的地开始，选择相关性最高的下一个）
-            start_idx = np.argmin([self.dist_k[d] for d in assigned_dests])
-            route = [assigned_dests[start_idx]]
-            remaining_dests = [d for i, d in enumerate(assigned_dests) if i != start_idx]
+            # --- 4. [新逻辑] 准备模型输入数据 ---
+            # 聚合订单：找出涉及的唯一站点及其乘客数
+            unique_dests = list(set(assigned_orders))
+            # 构造 loc (1, N, 2)
+            # self.dest_coords 是 numpy array (num_destinations, 2)
+            loc_np = self.dest_coords[unique_dests]
+            loc_tensor = torch.tensor(loc_np, device=self.device, dtype=torch.float32).unsqueeze(0)
 
-            while remaining_dests:
-                current_d = route[-1]
-                current_idx = assigned_dests.index(current_d)
-                # 选择与当前目的地相关性最高的未访问目的地
-                next_idx = np.argmax([attn_weights[current_idx][assigned_dests.index(d)] for d in remaining_dests])
-                next_d = remaining_dests.pop(next_idx)
-                route.append(next_d)
+            # 构造 weight (1, N)
+            weight_list = [assigned_orders.count(d) for d in unique_dests]
+            weight_tensor = torch.tensor(weight_list, device=self.device, dtype=torch.float32).unsqueeze(0)
 
-            # 6. 记录公交路径与订单
+            # --- 5. [新逻辑] 归一化与推理 ---
+            # loc 归一化: (loc - mean_loc) / std_loc
+            loc_norm = (loc_tensor - mean[None, None, :2]) / std[None, None, :2]
+            # weight 归一化: (weight - mean_weight) / std_weight
+            weight_norm = (weight_tensor - mean[2]) / std[2]
+
+            # 模型推理
+            # 输出 route_indices: (1, N)
+            # 索引含义: 0代表出发站, 1..N代表unique_dests中的第i-1个
+            with torch.no_grad():
+                route_indices, _ = self.route_model(loc_norm, start_norm, weight_norm)
+
+            # --- 6. [新逻辑] 解码路径 ---
+            pred_indices = (route_indices.squeeze(0).cpu().numpy() - 1).tolist()
+            
+            route = []
+            for idx in pred_indices:
+                # 过滤掉 idx = -1 (即出发站，不需要显式包含在路径列表中，因为 calculate_route_distance 会自动加)
+                if idx >= 0 and idx < len(unique_dests):
+                    dest_id = unique_dests[idx]
+                    route.append(dest_id)
+
+            # 记录公交路径与订单
             bus_routes[bus_id] = route
             bus_orders[bus_id] = assigned_orders
 

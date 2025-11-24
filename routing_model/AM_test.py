@@ -18,8 +18,8 @@ def eval():
     model.load_state_dict(torch.load(LOAD_PATH))
     model.eval()
 
-    file_paths = [f"C:\\Users\\Administrator\\Desktop\\TSC_trans\\SCAC\\dataset\\supervised_dataset_{n}_stations.json"
-                    for n in range(5, 16)]
+    file_paths = [f"C:\\Users\\Administrator\\Desktop\\TSC_trans\\SCAC\\dataset_traincenter\\supervised_dataset_{n}_stations.json"
+                    for n in range(5, 11)]
     data = load_supervised_data(file_paths)
 
     STATS_PATH = BASEPATH / "model" / "normalization_stats.pt"
@@ -79,11 +79,11 @@ def presingle(s):
     print("按预测顺序的坐标:\n", ordered_coords)
 
 if __name__ == "__main__":
-    # eval()
+    eval()
 
-    sample = {
-    "loc": np.array([[104.04413, 30.70977], [104.103498, 30.706014], [104.06094, 30.6717], [104.075863, 30.668877], [104.141627, 30.628662], [104.08916, 30.68314], [104.13192, 30.7533], [103.95682, 30.57135], [103.9764, 30.74614], [104.10869, 30.674], [103.99295, 30.67061], [104.02119, 30.64567], [104.04924, 30.68836], [104.05706, 30.7635], [104.01371, 30.70523], [104.08009, 30.65479], [104.02908, 30.68183], [104.06028, 30.57539], [104.06776, 30.61859]], dtype=np.float32),
-    "weight": np.array([4, 4, 2, 3, 2, 1, 1, 5, 2, 0, 2, 1, 3, 5, 4, 2, 3, 4, 2], dtype=np.float32),
-    "start": np.array([104.44473, 30.323036], dtype=np.float32),
-    }
-    presingle(sample)
+    # sample = {
+    # "loc": np.array([[104.075698, 30.695897], [104.141627, 30.628662], [104.07042, 30.65607], [104.05706, 30.7635], [104.103498, 30.706014]], dtype=np.float32),
+    # "weight": np.array([7, 6, 9, 16, 12], dtype=np.float32),
+    # "start": np.array([104.44473, 30.323036], dtype=np.float32),
+    # }
+    # presingle(sample)

@@ -15,7 +15,7 @@ N_HEADS = 8          # 多头注意力的头数
 N_LAYERS = 3         # Encoder的层数 best 6
 LEARNING_RATE = 1e-4 # 学习率
 BATCH_SIZE = 512       # 假设的批量大小
-START = [104.444731, 30.323036] # 起点坐标
+START = [104.06, 30.67] # 起点坐标
 NUM_EPOCHS = 5000      # 监督学习的训练轮数
 RESTART_EVERY = 2000  # 余弦退火重启周期
 
@@ -611,8 +611,8 @@ if __name__ == "__main__":
     )
 
     # 2. 准备数据 
-    file_paths = [BASE.parent / "dataset" / f"supervised_dataset_{n}_stations.json"
-                  for n in range(5, 16)]
+    file_paths = [BASE.parent / "dataset_traincenter" / f"supervised_dataset_{n}_stations.json"
+                  for n in range(5, 11)]
     data = load_supervised_data(file_paths)
     train_data, val_data = split_grouped_data(data, val_ratio=0.1, seed=42)
 
@@ -669,10 +669,10 @@ if __name__ == "__main__":
         # 保存最佳模型
         if val_token_nll < best_val_loss:
             best_val_loss = val_token_nll  # 更新最佳损失
-            # torch.save(model.state_dict(), SAVE_PATH)
-            # torch.save(stats, STATS_PATH)
+            torch.save(model.state_dict(), SAVE_PATH)
+            torch.save(stats, STATS_PATH)
             best_epoch = epoch # 记录最佳epoch
-            print(f"Saved best model at epoch {epoch+1} with ValTokNLL: {val_token_nll:.4f}")
+            # print(f"Saved best model at epoch {epoch+1} with ValTokNLL: {val_token_nll:.4f}")
 
         # 记录到 wandb
         wandb.log({
@@ -687,5 +687,6 @@ if __name__ == "__main__":
             print(f"Epoch {epoch+1}/{NUM_EPOCHS} | "
                 f"TrainSeqLoss: {train_seq_loss:.4f} | TrainTokNLL: {train_token_nll:.4f} | "
                 f"ValSeqLoss: {val_seq_loss:.4f} | ValTokNLL: {val_token_nll:.4f}")
+    print(f"Training complete. Best validation token NLL: {best_val_loss:.4f} at epoch {best_epoch+1}")
 
     wandb.finish()
